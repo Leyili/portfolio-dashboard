@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>个人投资组合仪表盘</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1116; --card:#161b24; --card2:#1b212c; --border:#272f3d;
+    --text:#e9eef6; --muted:#8d97a8; --accent:#4a8cff;
+    --up:#f4575f; --down:#2ec27e; --warn:#e8a13a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-size:15px;line-height:1.6;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 18px 60px}
+  h1{font-size:22px;font-weight:600}
+  h2{font-size:17px;font-weight:600;margin-bottom:14px}
+  .sub{color:var(--muted);font-size:13px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:18px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g6{grid-template-columns:repeat(6,1fr)}
+  .num{font-size:30px;font-weight:600;letter-spacing:-0.5px;font-variant-numeric:tabular-nums}
+  .num-lg{font-size:42px;font-weight:600;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+  .label{color:var(--muted);font-size:13px;margin-bottom:6px}
+  .up{color:var(--up)} .down{color:var(--down)} .muted{color:var(--muted)}
+  .bar{height:12px;background:#232a36;border-radius:6px;overflow:hidden;margin:14px 0 8px}
+  .bar>i{display:block;height:100%;background:linear-gradient(90deg,#3d7bff,#6ea1ff);border-radius:6px}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{color:var(--muted);font-weight:400;text-align:right;padding:9px 10px;border-bottom:1px solid var(--border);
+    font-size:13px;white-space:nowrap}
+  td{padding:11px 10px;border-bottom:1px solid #1e2531;text-align:right;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  tbody tr:last-child td{border-bottom:none}
+  .tfoot td{font-weight:600;border-top:1px solid var(--border)}
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;
+    background:#232a36;color:var(--muted)}
+  .tag.warn{background:rgba(232,161,58,.15);color:var(--warn)}
+  .tag.danger{background:rgba(244,87,95,.15);color:var(--up)}
+  .tag.ok{background:rgba(46,194,126,.15);color:var(--down)}
+  .conc{margin-bottom:12px}
+  .conc-top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px}
+  .conc-bar{height:9px;background:#232a36;border-radius:5px;overflow:hidden}
+  .conc-bar>i{display:block;height:100%;border-radius:5px;background:var(--accent)}
+  .risk{background:var(--card2);border-left:3px solid var(--warn);border-radius:8px;
+    padding:13px 15px;margin-bottom:11px;font-size:14px}
+  .risk b{color:var(--warn)}
+  .risk.danger{border-left-color:var(--up)} .risk.danger b{color:var(--up)}
+  .risk.info{border-left-color:var(--accent)} .risk.info b{color:var(--accent)}
+  .chart-box{position:relative;height:320px}
+  .hdr{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+  .stale{background:rgba(232,161,58,.12);border:1px solid rgba(232,161,58,.3);color:var(--warn);
+    border-radius:10px;padding:11px 15px;font-size:14px;margin-bottom:18px}
+  .pill{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+    border:1px solid var(--border);border-radius:999px;padding:5px 13px;font-size:13px;color:var(--muted)}
+  [hidden]{display:none!important}
+  .lock-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+  .lock-card{width:100%;max-width:430px;background:var(--card);border:1px solid var(--border);
+    border-radius:16px;padding:30px 26px}
+  .lock-title{font-size:23px;font-weight:600;margin-bottom:6px}
+  .lock-sub{color:var(--muted);font-size:15px;margin-bottom:24px}
+  .lock-input{width:100%;font-size:19px;padding:14px 16px;border-radius:10px;
+    border:1px solid var(--border);background:var(--card2);color:var(--text);outline:none}
+  .lock-input:focus{border-color:var(--accent)}
+  .lock-btn{width:100%;margin-top:15px;font-size:18px;padding:14px;border-radius:10px;
+    border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+  .lock-remember{display:flex;align-items:center;gap:9px;margin-top:16px;font-size:14px;color:var(--muted)}
+  .lock-err{margin-top:12px;font-size:15px;color:var(--up);min-height:22px}
+  .lock-note{margin-top:12px;font-size:14px;color:var(--warn);line-height:1.5}
+  @media(max-width:900px){.g6{grid-template-columns:repeat(3,1fr)}.g3{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:640px){
+    .wrap{padding:16px 12px 40px}
+    .g2,.g3,.g6{grid-template-columns:repeat(2,1fr)}
+    .num{font-size:22px} .num-lg{font-size:32px}
+    .card{padding:15px}
+    .chart-box{height:260px}
+    h1{font-size:19px}
+  }
+</style>
+</head>
+<body>
+<div id="lock" class="lock-wrap" hidden>
+  <div class="lock-card">
+    <div class="lock-title">持仓看板已加密</div>
+    <div class="lock-sub">输入密码后才能查看</div>
+    <input id="pw" class="lock-input" type="password" autocomplete="current-password" placeholder="看板密码">
+    <button id="unlock" class="lock-btn">解锁</button>
+    <label class="lock-remember"><input type="checkbox" id="remember"> 在这台设备记住密码</label>
+    <div id="err" class="lock-err"></div>
+    <div id="nocrypto" class="lock-note" hidden>当前浏览器环境不支持解密接口。请通过 https 或本地 http 服务打开本页面（不要直接双击 file:// 打开）。</div>
+  </div>
+</div>
+<div class="wrap" id="board" hidden>
+  <div class="hdr">
+    <div>
+      <h1 id="title">个人投资组合仪表盘</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <div class="pill" id="stamp"></div>
+  </div>
+  <div id="stale"></div>
+  <div id="app"></div>
+</div>
+<script>
+const PAYLOAD = __PAYLOAD__;
+
+function renderBoard(DATA){
+const S = DATA.summary;
+
+const nf = (n, d) => (n === null || n === undefined || isNaN(n)) ? '—'
+  : Number(n).toLocaleString('zh-CN', {minimumFractionDigits: d === undefined ? 2 : d, maximumFractionDigits: d === undefined ? 2 : d});
+const wan = n => (n === null || n === undefined) ? '—' : nf(n / 10000, 2) + ' 万';
+const sgn = n => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '') + nf(n);
+const sgnPct = n => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '') + nf(n, 2) + '%';
+const cls = n => n === null || n === undefined ? '' : (n > 0 ? 'up' : (n < 0 ? 'down' : ''));
+const ccls = n => n === null || n === undefined ? '' : (n > 0 ? 'down' : (n < 0 ? 'up' : ''));
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+/* ---------- 头部 ---------- */
+if (S.owner) document.getElementById('title').textContent = '个人投资组合仪表盘 · ' + S.owner;
+document.getElementById('subtitle').textContent =
+  '退休目标 ' + wan(S.target) + ' · ' + S.years + ' 年后（' + S.retire_age + ' 岁）';
+document.getElementById('stamp').textContent = '数据截止 ' + S.as_of + ' · 生成于 ' + S.generated_at;
+
+const todayStr = new Date().toISOString().slice(0, 10);
+const box = document.getElementById('stale');
+if (S.as_of < todayStr) {
+  const d = Math.round((new Date(todayStr) - new Date(S.as_of)) / 86400000);
+  if (d >= 2) {
+    box.innerHTML = '<div class="stale">数据截止 ' + S.as_of + '，已 ' + d
+      + ' 天未更新。请检查自动更新任务是否正常运行。</div>';
+  } else {
+    box.innerHTML = '<div class="stale" style="border-color:#272f3d;color:var(--muted)">'
+      + '数据截止 ' + S.as_of + '：当日行情尚未结算（收盘后约 15:30 自动更新）。</div>';
+  }
+} else if (!S.trading_today) {
+  box.innerHTML = '<div class="stale" style="border-color:#272f3d;color:var(--muted)">'
+    + '今日非交易日或行情未更新，当前显示最近一个交易日数据。</div>';
+}
+
+/* ---------- 目标进度 ---------- */
+let targetCard = ''
+  + '<div class="card">'
+  +   '<h2>退休储备目标完成情况</h2>'
+  +   '<div class="grid g3">'
+  +     '<div><div class="label">目标完成度</div>'
+  +       '<div class="num-lg">' + nf(S.progress, 1) + '%</div>'
+  +       '<div class="sub">' + wan(S.net_asset) + ' / ' + wan(S.target) + '</div></div>'
+  +     '<div><div class="label">尚缺</div>'
+  +       '<div class="num">' + wan(S.gap) + '</div>'
+  +       '<div class="sub">' + nf(100 - S.progress, 1) + '% 待完成</div></div>'
+  +     '<div><div class="label">所需年化（不复投额外储蓄）</div>'
+  +       '<div class="num">' + nf(S.required_cagr, 2) + '%</div>'
+  +       '<div class="sub">距退休 ' + S.years + ' 年</div></div>'
+  +   '</div>'
+  +   '<div class="bar"><i style="width:' + Math.min(100, S.progress).toFixed(1) + '%"></i></div>'
+  +   '<div class="sub">'
+  +     (S.progress < 50 ? '进度偏低，需提高储蓄或降低波动' : '进度过半，保持节奏')
+  +     ' · 融资 ' + wan(S.total_margin) + '，占净资产 ' + nf(S.margin_ratio, 1) + '%'
+  +   '</div>'
+  + '</div>';
+
+/* ---------- 核心数字 ---------- */
+const cells = [
+  ['净资产（三账户合计）', nf(S.net_asset), wan(S.net_asset), ''],
+  ['当日盈亏', sgn(S.day_pnl), sgnPct(S.day_pnl_pct), cls(S.day_pnl)],
+  ['持仓浮动盈亏', sgn(S.float_pnl), sgnPct(S.float_pnl_pct), cls(S.float_pnl)],
+  ['股票市值', nf(S.total_market_value), wan(S.total_market_value), ''],
+  ['可用现金', nf(S.total_cash), wan(S.total_cash), ''],
+  ['融资负债', (S.total_margin ? '-' + nf(S.total_margin) : '0.00'), '占净资产 ' + nf(S.margin_ratio, 1) + '%', ''],
+];
+let numCard = '<div class="card"><div class="grid g6">';
+cells.forEach(c => {
+  numCard += '<div><div class="label">' + c[0] + '</div>'
+    + '<div class="num ' + c[3] + '">' + c[1] + '</div>'
+    + '<div class="sub">' + c[2] + '</div></div>';
+});
+numCard += '</div></div>';
+
+/* ---------- 走势图 ---------- */
+let chartCard = ''
+  + '<div class="card">'
+  +   '<h2>净资产走势与每日盈亏</h2>'
+  +   '<div class="chart-box"><canvas id="navChart"></canvas></div>'
+  + '</div>';
+
+/* ---------- 分账户 ---------- */
+let accHtml = '';
+DATA.accounts.forEach(a => {
+  accHtml += '<div class="card"><h2>' + esc(a.name) + '</h2>'
+    + '<div class="grid g3">'
+    +   '<div><div class="label">净资产（扣融资后）</div><div class="num">' + nf(a.net) + '</div>'
+    +     '<div class="sub">' + wan(a.net) + ' 元</div></div>'
+    +   '<div><div class="label">当日盈亏</div><div class="num ' + cls(a.day_pnl) + '">' + sgn(a.day_pnl) + '</div></div>'
+    +   '<div><div class="label">持仓浮动盈亏</div><div class="num ' + cls(a.float_pnl) + '">' + sgn(a.float_pnl) + '</div>'
+    +     '<div class="sub">' + sgnPct(a.float_pnl_pct) + '</div></div>'
+    + '</div>'
+    + '<div class="sub" style="margin:12px 0 8px">股票市值 <b>' + nf(a.stock_value) + '</b>'
+    +   ' · 可用现金 <b>' + nf(a.cash) + '</b>'
+    +   (a.margin_debt ? ' · 融资负债 <b class="up">-' + nf(a.margin_debt) + '</b>' : '') + '</div>'
+    + '<div class="scroll"><table><thead><tr>'
+    +   '<th>个股</th><th>数量</th><th>成本</th><th>现价</th><th>涨跌</th>'
+    +   '<th>市值</th><th>当日盈亏</th><th>累计盈亏</th><th>盈亏比例</th>'
+    + '</tr></thead><tbody>';
+  a.holdings.slice().sort((x, y) => y.market_value - x.market_value).forEach(h => {
+    accHtml += '<tr>'
+      + '<td>' + esc(h.name) + '<span class="tag" style="margin-left:6px">' + h.code + '</span></td>'
+      + '<td>' + nf(h.shares, 0) + '</td>'
+      + '<td>' + (h.cost === null ? '—' : nf(h.cost, 3)) + '</td>'
+      + '<td>' + nf(h.price, 3) + '</td>'
+      + '<td class="' + ccls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
+      + '<td>' + nf(h.market_value) + '</td>'
+      + '<td class="' + cls(h.day_pnl) + '">' + sgn(h.day_pnl) + '</td>'
+      + '<td class="' + cls(h.total_pnl) + '">' + (h.total_pnl === null ? '—' : sgn(h.total_pnl)) + '</td>'
+      + '<td class="' + cls(h.pnl_pct) + '">' + (h.pnl_pct === null ? '—' : sgnPct(h.pnl_pct)) + '</td>'
+      + '</tr>';
+  });
+  accHtml += '</tbody><tfoot class="tfoot"><tr><td>合计</td><td></td><td></td><td></td><td></td>'
+    + '<td>' + nf(a.stock_value) + '</td>'
+    + '<td class="' + cls(a.day_pnl) + '">' + sgn(a.day_pnl) + '</td>'
+    + '<td class="' + cls(a.float_pnl) + '">' + sgn(a.float_pnl) + '</td>'
+    + '<td class="' + cls(a.float_pnl_pct) + '">' + sgnPct(a.float_pnl_pct) + '</td>'
+    + '</tr></tfoot></table></div></div>';
+});
+
+/* ---------- 个股明细 ---------- */
+let allHtml = '<div class="card"><h2>个股持仓明细（按市值排序）</h2><div class="scroll">'
+  + '<table><thead><tr><th>个股</th><th>所属账户</th><th>数量</th><th>成本</th><th>现价</th>'
+  + '<th>涨跌</th><th>市值</th><th>当日盈亏</th><th>累计盈亏</th><th>盈亏比例</th></tr></thead><tbody>';
+DATA.holdings.forEach(h => {
+  allHtml += '<tr>'
+    + '<td>' + esc(h.name) + '<span class="tag" style="margin-left:6px">' + h.code + '</span></td>'
+    + '<td class="muted">' + esc(h.account_name.replace('股票账户', '账户')) + '</td>'
+    + '<td>' + nf(h.shares, 0) + '</td>'
+    + '<td>' + (h.cost === null ? '—' : nf(h.cost, 3)) + '</td>'
+    + '<td>' + nf(h.price, 3) + '</td>'
+    + '<td class="' + ccls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
+    + '<td>' + nf(h.market_value) + '</td>'
+    + '<td class="' + cls(h.day_pnl) + '">' + sgn(h.day_pnl) + '</td>'
+    + '<td class="' + cls(h.total_pnl) + '">' + (h.total_pnl === null ? '—' : sgn(h.total_pnl)) + '</td>'
+    + '<td class="' + cls(h.pnl_pct) + '">' + (h.pnl_pct === null ? '—' : sgnPct(h.pnl_pct)) + '</td>'
+    + '</tr>';
+});
+allHtml += '</tbody></table></div></div>';
+
+/* ---------- 集中度 ---------- */
+let concHtml = '<div class="card"><h2>持仓集中度（三账户合并）</h2>';
+DATA.concentration.forEach(c => {
+  const isCash = c.code === 'CASH';
+  concHtml += '<div class="conc"><div class="conc-top">'
+    + '<span>' + esc(c.name) + (isCash ? '' : ' <span class="tag">' + c.code + '</span>') + '</span>'
+    + '<span>' + nf(c.pct, 1) + '% · ' + wan(c.market_value) + '</span></div>'
+    + '<div class="conc-bar"><i style="width:' + Math.min(100, c.pct).toFixed(1) + '%;'
+    + 'background:' + (isCash ? '#4a5568' : (c.pct > 30 ? '#f4575f' : '#4a8cff')) + '"></i></div>'
+    + '</div>';
+});
+concHtml += '</div>';
+
+/* ---------- 每日明细 ---------- */
+let histHtml = '<div class="card"><h2>每日资产与盈亏明细（近 ' + DATA.history.length + ' 个交易日）</h2>'
+  + '<div class="scroll"><table><thead><tr><th>日期</th><th>净资产（元）</th><th>较前一日（元）</th>'
+  + '<th>当日收益率</th><th>目标完成度</th><th>距目标（元）</th></tr></thead><tbody>';
+DATA.history.slice().reverse().forEach(h => {
+  histHtml += '<tr><td>' + h.date + '</td><td>' + nf(h.net_asset) + '</td>'
+    + '<td class="' + cls(h.change) + '">' + sgn(h.change) + '</td>'
+    + '<td class="' + cls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
+    + '<td>' + nf(h.progress, 2) + '%</td><td>' + nf(h.gap, 0) + '</td></tr>';
+});
+histHtml += '</tbody></table></div></div>';
+
+/* ---------- 风险提示 ---------- */
+const top = DATA.concentration.filter(c => c.code !== 'CASH')[0];
+let risks = [];
+if (top && top.pct > 20) {
+  risks.push(['danger', '集中度过高：<b>' + esc(top.name) + '</b> 占净资产 <b>' + nf(top.pct, 1)
+    + '%</b>（市值 ' + wan(top.market_value) + '）。单一标的波动将主导整个组合表现，'
+    + '对退休储备这类长期目标，建议单一股票敞口控制在净资产的 10% 以内。']);
+}
+if (S.total_margin > 0) {
+  risks.push(['danger', '使用杠杆：融资余额 <b>' + wan(S.total_margin) + '</b>，占净资产 <b>'
+    + nf(S.margin_ratio, 1) + '%</b>。杠杆会放大下跌，且融资利息侵蚀长期复利，退休储备账户建议逐步降为 0。']);
+}
+if (S.float_pnl < 0) {
+  risks.push(['', '整体浮亏：持仓浮动亏损 <b>' + wan(Math.abs(S.float_pnl)) + '</b>（'
+    + sgnPct(S.float_pnl_pct) + '）。需区分「公司经营恶化」与「市场系统性回撤」，前者应止损，后者可持有。']);
+}
+risks.push(['info', '目标测算：按当前 <b>' + wan(S.net_asset) + '</b> 净资产，距 ' + S.retire_age
+  + ' 岁退休还有 <b>' + S.years + '</b> 年，达成 ' + wan(S.target) + ' 需年化 <b>' + nf(S.required_cagr, 2)
+  + '%</b>。但该组合历史波动显著（见上方曲线），实际路径会有大幅偏离，'
+  + '建议以「宽基指数 + 债券 + 少量卫星仓位」重构，把所需收益率交给时间而不是选股。']);
+risks.push(['info', '下一步：① 明确三个账户的统一目标权重；② 制定 <b>' + esc(top ? top.name : '重仓股')
+  + '</b> 的减持节奏（避免一次性冲击成本）；③ 建立每季度一次的再平衡纪律；'
+  + '④ 预留 6–12 个月生活费的现金垫，避免被动卖出。']);
+
+let riskHtml = '<div class="card"><h2>风险提示与建议</h2>';
+risks.forEach(r => {
+  riskHtml += '<div class="risk ' + (r[0] === 'danger' ? 'danger' : (r[0] === 'info' ? 'info' : '')) + '">' + r[1] + '</div>';
+});
+riskHtml += '</div>';
+
+document.getElementById('app').innerHTML =
+  targetCard + numCard + chartCard + accHtml + allHtml + concHtml + histHtml + riskHtml;
+
+/* ---------- 图表 ---------- */
+(function () {
+  if (typeof Chart === 'undefined') {
+    document.querySelector('.chart-box').innerHTML =
+      '<div class="sub" style="padding:40px 0;text-align:center">图表库未能加载，上方表格数据仍可正常查看。</div>';
+    return;
+  }
+  const h = DATA.history;
+  const labels = h.map(x => x.date.slice(5));
+  const gridC = '#1e2531', tickC = '#8d97a8';
+  new Chart(document.getElementById('navChart'), {
+    data: {
+      labels: labels,
+      datasets: [
+        { type: 'line', label: '净资产（元）', data: h.map(x => x.net_asset),
+          borderColor: '#4a8cff', backgroundColor: 'rgba(74,140,255,.10)',
+          borderWidth: 2.5, fill: true, tension: .25, pointRadius: 0,
+          pointHoverRadius: 5, yAxisID: 'y' },
+        { type: 'bar', label: '当日盈亏（元）', data: h.map(x => x.change),
+          backgroundColor: h.map(x => x.change >= 0 ? 'rgba(244,87,95,.75)' : 'rgba(46,194,126,.75)'),
+          yAxisID: 'y1', order: 2 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: tickC, font: { size: 13 } } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label + '：'
+              + Number(ctx.parsed.y).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: gridC }, ticks: { color: tickC, font: { size: 12 } } },
+        y: { position: 'left', grid: { color: gridC },
+             ticks: { color: tickC, font: { size: 12 },
+               callback: v => (v / 10000).toFixed(0) + '万' } },
+        y1: { position: 'right', grid: { drawOnChartArea: false },
+              ticks: { color: tickC, font: { size: 12 },
+                callback: v => (v / 10000).toFixed(1) + '万' } }
+      }
+    }
+  });
+})();
+}
+</script>
+<script>
+/* ---------- 加密解锁 ---------- */
+(async function () {
+  const P = PAYLOAD;
+  const board = document.getElementById('board');
+  const lock = document.getElementById('lock');
+  const errBox = document.getElementById('err');
+  const pwInput = document.getElementById('pw');
+  const remember = document.getElementById('remember');
+  const STORE = 'pd_password_v1';
+  const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+  async function openWith(pw) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw),
+      'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: b64d(P.salt), iterations: P.iter, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64d(P.iv) },
+      key, b64d(P.data));
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  function reveal(data) {
+    lock.hidden = true;
+    board.hidden = false;
+    renderBoard(data);
+  }
+
+  async function attempt(pw) {
+    if (!pw) { errBox.textContent = '请输入密码'; return; }
+    try {
+      const data = await openWith(pw);
+      try { remember.checked ? localStorage.setItem(STORE, pw) : localStorage.removeItem(STORE); } catch (e) {}
+      reveal(data);
+    } catch (e) {
+      errBox.textContent = '密码不对，或这页数据已损坏。';
+      pwInput.value = '';
+      pwInput.focus();
+    }
+  }
+
+  if (!P.enc) { reveal(P.data); return; }
+
+  if (!window.crypto || !crypto.subtle) {
+    lock.hidden = false;
+    document.getElementById('nocrypto').hidden = false;
+    pwInput.disabled = true;
+    document.getElementById('unlock').disabled = true;
+    return;
+  }
+
+  let saved = null;
+  try { saved = localStorage.getItem(STORE); } catch (e) {}
+  if (saved) {
+    try { reveal(await openWith(saved)); return; } catch (e) {
+      try { localStorage.removeItem(STORE); } catch (x) {}
+    }
+  }
+
+  lock.hidden = false;
+  pwInput.focus();
+  document.getElementById('unlock').onclick = () => attempt(pwInput.value);
+  pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(pwInput.value); });
+})();
+</script>
+</body>
+</html>

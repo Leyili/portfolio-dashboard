@@ -1,0 +1,12 @@
+# 真实持仓、成本、账户现金与融资 —— 明文，绝不进仓库
+holdings.json
+
+# 本地生成的看板（本地默认是明文版，方便双击直接看）
+dashboard.html
+
+# 本地保存的密码
+secret.txt
+
+__pycache__/
+*.pyc
+.DS_Store

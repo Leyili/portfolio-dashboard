@@ -1,0 +1,50 @@
+name: 更新持仓看板
+
+on:
+  schedule:
+    # 周一至周五 07:30 UTC = 北京时间 15:30，收盘后跑
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 密码只从仓库 Secrets 注入，不落任何文件
+      - name: 解开加密持仓
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: python update.py --unpack
+
+      - name: 抓行情并生成加密看板
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: python update.py
+
+      - name: 回写加密持仓并输出 index.html
+        env:
+          DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
+        run: |
+          python update.py --pack
+          cp dashboard.html index.html
+
+      - name: 提交更新
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html holdings.json.enc
+          if git diff --quiet --cached; then
+            echo "本次无数据变化，跳过提交"
+          else
+            git commit -m "chore: 更新看板数据 $(date -u +'%Y-%m-%d')"
+            git push
+          fi
