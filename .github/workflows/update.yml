@@ -3,6 +3,7 @@ name: 更新持仓看板
 on:
   schedule:
     # 周一至周五 07:30 UTC = 北京时间 15:30，收盘后跑
+    # 周末本来就不触发；法定节假日由下面的「交易日判断」步骤拦掉
     - cron: '30 7 * * 1-5'
   workflow_dispatch:
 
@@ -19,18 +20,29 @@ jobs:
         with:
           python-version: '3.12'
 
+      # 先判断今天是不是 A 股交易日（按北京时间 + trade_calendar.json）
+      # 周末与法定节假日（春节/清明/五一/端午/中秋/国庆等）一律跳过，不解密、不抓行情、不提交
+      - name: 判断是否为 A 股交易日
+        id: td
+        run: |
+          python update.py --check-trading-day | tee /tmp/td.txt
+          echo "is_trading=$(grep '^TRADING_DAY=' /tmp/td.txt | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+
       # 密码只从仓库 Secrets 注入，不落任何文件
       - name: 解开加密持仓
+        if: steps.td.outputs.is_trading == 'true'
         env:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: python update.py --unpack
 
       - name: 抓行情并生成加密看板
+        if: steps.td.outputs.is_trading == 'true'
         env:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: python update.py
 
       - name: 回写加密持仓并输出 index.html
+        if: steps.td.outputs.is_trading == 'true'
         env:
           DASHBOARD_PASSWORD: ${{ secrets.DASHBOARD_PASSWORD }}
         run: |
@@ -38,6 +50,7 @@ jobs:
           cp dashboard.html index.html
 
       - name: 提交更新
+        if: steps.td.outputs.is_trading == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

@@ -17,6 +17,7 @@
   python update.py --encrypt    # 加密生成，会询问密码并可选存入 secret.txt
   python update.py --password 密码            # 用指定密码加密
   python update.py --pack / --unpack          # 把 holdings.json 加/解密成 .enc
+  python update.py --skip-if-closed           # 非交易日（周末/法定节假日）直接跳过，不写文件
 
 密码来源（按顺序）：
   1. 环境变量 DASHBOARD_PASSWORD   ← GitHub Actions 用这个（存在仓库 Secrets 里）
@@ -31,7 +32,7 @@ import os
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, date, timedelta, timezone
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 HOLDINGS_PATH = os.path.join(BASE, "holdings.json")
@@ -39,6 +40,10 @@ TEMPLATE_PATH = os.path.join(BASE, "template.html")
 OUTPUT_PATH = os.path.join(BASE, "dashboard.html")
 SECRET_PATH = os.path.join(BASE, "secret.txt")
 PACKED_PATH = os.path.join(BASE, "holdings.json.enc")
+CALENDAR_PATH = os.path.join(BASE, "trade_calendar.json")
+
+# 服务器（GitHub Actions runner）是 UTC，A 股按北京时间走，必须显式换算
+CN_TZ = timezone(timedelta(hours=8))
 
 sys.path.insert(0, BASE)
 try:
@@ -62,6 +67,82 @@ def load_holdings():
 def save_holdings(data):
     with open(HOLDINGS_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# ----------------------------------------------------------------------------
+# 交易日历（周末 + 法定节假日）
+# ----------------------------------------------------------------------------
+
+_CALENDAR_CACHE = None
+
+
+def load_calendar():
+    """返回 {日期: True} 的交易日集合。文件缺失时返回空集合（退化为只判断周末）。"""
+    global _CALENDAR_CACHE
+    if _CALENDAR_CACHE is None:
+        try:
+            with open(CALENDAR_PATH, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+            _CALENDAR_CACHE = {d: True for d in obj.get("trading_days", [])}
+        except Exception:
+            _CALENDAR_CACHE = {}
+    return _CALENDAR_CACHE
+
+
+def cn_today():
+    """按北京时间取当天日期字符串。"""
+    return datetime.now(CN_TZ).strftime("%Y-%m-%d")
+
+
+def _calendar_range(cal):
+    ks = sorted(cal)
+    return (ks[0], ks[-1]) if ks else (None, None)
+
+
+def is_trading_day(day):
+    """是否为 A 股交易日。
+
+    1) 日期在 trade_calendar.json 覆盖范围内 → 直接查表（含法定节假日休市）；
+    2) 超出覆盖范围（日历未更新到该年份）→ 退化为「周一至周五」判断，
+       宁可按工作日更新，也不能因为日历过期而永久停更。
+    """
+    cal = load_calendar()
+    if cal:
+        if day in cal:
+            return True
+        lo, hi = _calendar_range(cal)
+        if lo and lo <= day <= hi:
+            return False  # 覆盖范围内但不在交易日列表里 = 休市
+    try:
+        return date.fromisoformat(day).weekday() < 5
+    except Exception:
+        return True
+
+
+def _shift(day, step, limit=40):
+    """按日历（覆盖范围内）或周一至周五（超出范围）找相邻交易日。"""
+    cal = load_calendar()
+    lo, hi = _calendar_range(cal)
+    cur = date.fromisoformat(day)
+    for _ in range(limit):
+        cur += timedelta(days=step)
+        s = cur.isoformat()
+        if lo and lo <= s <= hi:
+            if s in cal:
+                return s
+        elif cur.weekday() < 5:
+            return s
+    return None
+
+
+def next_trading_day(day):
+    """返回 > day 的下一个交易日。"""
+    return _shift(day, 1)
+
+
+def prev_trading_day(day):
+    """返回 < day 的最近一个交易日。"""
+    return _shift(day, -1)
 
 
 # ----------------------------------------------------------------------------
@@ -430,9 +511,13 @@ def compute(data, quotes, quote_date, trading_today):
         "required_cagr": required_cagr,
         "margin_ratio": (total_margin / net_asset * 100) if net_asset else 0.0,
         "as_of": quote_date,
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "generated_at": datetime.now(CN_TZ).strftime("%Y-%m-%d %H:%M:%S"),
         "trading_today": trading_today,
         "owner": meta.get("owner", ""),
+        # 休市期间不报「数据陈旧」：只要数据截止日已是最近一个交易日就算正常
+        "last_trading_day": (cn_today() if trading_today
+                             else (prev_trading_day(cn_today()) or quote_date)),
+        "next_trading_day": next_trading_day(cn_today()) or "",
     }
 
     return {
@@ -559,6 +644,20 @@ def render(calc, password=None):
 def main():
     offline = "--offline" in sys.argv
 
+    # 给 CI 用的探针：只报今天是不是交易日，不联网、不写任何文件
+    if "--check-trading-day" in sys.argv:
+        day = cn_today()
+        ok = is_trading_day(day)
+        print("TODAY=%s" % day)
+        print("TRADING_DAY=%s" % ("true" if ok else "false"))
+        prv = prev_trading_day(day)
+        nxt = next_trading_day(day)
+        if prv:
+            print("PREV=%s" % prv)
+        if nxt:
+            print("NEXT=%s" % nxt)
+        return
+
     if "--pack" in sys.argv or "--unpack" in sys.argv:
         pw = resolve_password(sys.argv) or _ask("  密码（用于加/解密持仓文件）：")
         if not pw:
@@ -570,8 +669,23 @@ def main():
             unpack_holdings(pw)
         return
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    # 统一按北京时间取「今天」——runner 在 UTC 时区，直接用 datetime.now() 会差 8 小时
+    today = cn_today()
     data = load_holdings()
+
+    if "--skip-if-closed" in sys.argv and not is_trading_day(today):
+        nxt = next_trading_day(today)
+        prv = prev_trading_day(today)
+        print("[跳过] %s 不是 A 股交易日（周末或法定节假日），不更新数据。" % today)
+        if prv:
+            print("  最近交易日：%s" % prv)
+        if nxt:
+            print("  下一交易日：%s" % nxt)
+        print("  页面与持仓文件保持原样，本次不产生提交。")
+        return
+
+    if not is_trading_day(today):
+        print("[提示] %s 非交易日，仍按最近交易日数据渲染页面" % today)
 
     quotes = {}
     klines = {}

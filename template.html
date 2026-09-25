@@ -119,7 +119,7 @@ const wan = n => (n === null || n === undefined) ? '—' : nf(n / 10000, 2) + ' 
 const sgn = n => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '') + nf(n);
 const sgnPct = n => (n === null || n === undefined) ? '—' : (n >= 0 ? '+' : '') + nf(n, 2) + '%';
 const cls = n => n === null || n === undefined ? '' : (n > 0 ? 'up' : (n < 0 ? 'down' : ''));
-const ccls = n => n === null || n === undefined ? '' : (n > 0 ? 'down' : (n < 0 ? 'up' : ''));
+// A 股习惯：涨=红（.up）、跌=绿（.down）。涨跌幅与盈亏同色，不再反转。
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 /* ---------- 头部 ---------- */
@@ -128,17 +128,24 @@ document.getElementById('subtitle').textContent =
   '退休目标 ' + wan(S.target) + ' · ' + S.years + ' 年后（' + S.retire_age + ' 岁）';
 document.getElementById('stamp').textContent = '数据截止 ' + S.as_of + ' · 生成于 ' + S.generated_at;
 
-const todayStr = new Date().toISOString().slice(0, 10);
+// 用本地日期（浏览器所在时区），不用 toISOString()——那是 UTC，晚上会差一天
+const dayStr = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+  + '-' + String(d.getDate()).padStart(2, '0');
+const todayStr = dayStr(new Date());
 const box = document.getElementById('stale');
-if (S.as_of < todayStr) {
-  const d = Math.round((new Date(todayStr) - new Date(S.as_of)) / 86400000);
-  if (d >= 2) {
-    box.innerHTML = '<div class="stale">数据截止 ' + S.as_of + '，已 ' + d
-      + ' 天未更新。请检查自动更新任务是否正常运行。</div>';
-  } else {
-    box.innerHTML = '<div class="stale" style="border-color:#272f3d;color:var(--muted)">'
-      + '数据截止 ' + S.as_of + '：当日行情尚未结算（收盘后约 15:30 自动更新）。</div>';
-  }
+const expected = S.last_trading_day || S.as_of;
+
+if (S.as_of < expected) {
+  // 数据落后于最近一个交易日 —— 休市期间不该出现，说明自动更新可能挂了
+  const d = Math.round((new Date(expected) - new Date(S.as_of)) / 86400000);
+  box.innerHTML = '<div class="stale">数据截止 ' + S.as_of + '，落后最近交易日（' + expected
+    + '）约 ' + d + ' 天。请检查仓库 Actions 自动更新任务是否正常。</div>';
+} else if (S.as_of < todayStr) {
+  // 数据已是最近交易日 —— 休市 / 当日尚未结算，属正常
+  box.innerHTML = '<div class="stale" style="border-color:#272f3d;color:var(--muted)">'
+    + '数据截止 ' + S.as_of + '（最近交易日）'
+    + (S.next_trading_day ? '，下一交易日 ' + S.next_trading_day + ' 收盘后自动更新' : '')
+    + '。休市期间不更新数据。</div>';
 } else if (!S.trading_today) {
   box.innerHTML = '<div class="stale" style="border-color:#272f3d;color:var(--muted)">'
     + '今日非交易日或行情未更新，当前显示最近一个交易日数据。</div>';
@@ -161,8 +168,7 @@ let targetCard = ''
   +   '</div>'
   +   '<div class="bar"><i style="width:' + Math.min(100, S.progress).toFixed(1) + '%"></i></div>'
   +   '<div class="sub">'
-  +     (S.progress < 50 ? '进度偏低，需提高储蓄或降低波动' : '进度过半，保持节奏')
-  +     ' · 融资 ' + wan(S.total_margin) + '，占净资产 ' + nf(S.margin_ratio, 1) + '%'
+  +     '融资 ' + wan(S.total_margin) + '，占净资产 ' + nf(S.margin_ratio, 1) + '%'
   +   '</div>'
   + '</div>';
 
@@ -214,7 +220,7 @@ DATA.accounts.forEach(a => {
       + '<td>' + nf(h.shares, 0) + '</td>'
       + '<td>' + (h.cost === null ? '—' : nf(h.cost, 3)) + '</td>'
       + '<td>' + nf(h.price, 3) + '</td>'
-      + '<td class="' + ccls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
+      + '<td class="' + cls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
       + '<td>' + nf(h.market_value) + '</td>'
       + '<td class="' + cls(h.day_pnl) + '">' + sgn(h.day_pnl) + '</td>'
       + '<td class="' + cls(h.total_pnl) + '">' + (h.total_pnl === null ? '—' : sgn(h.total_pnl)) + '</td>'
@@ -229,83 +235,8 @@ DATA.accounts.forEach(a => {
     + '</tr></tfoot></table></div></div>';
 });
 
-/* ---------- 个股明细 ---------- */
-let allHtml = '<div class="card"><h2>个股持仓明细（按市值排序）</h2><div class="scroll">'
-  + '<table><thead><tr><th>个股</th><th>所属账户</th><th>数量</th><th>成本</th><th>现价</th>'
-  + '<th>涨跌</th><th>市值</th><th>当日盈亏</th><th>累计盈亏</th><th>盈亏比例</th></tr></thead><tbody>';
-DATA.holdings.forEach(h => {
-  allHtml += '<tr>'
-    + '<td>' + esc(h.name) + '<span class="tag" style="margin-left:6px">' + h.code + '</span></td>'
-    + '<td class="muted">' + esc(h.account_name.replace('股票账户', '账户')) + '</td>'
-    + '<td>' + nf(h.shares, 0) + '</td>'
-    + '<td>' + (h.cost === null ? '—' : nf(h.cost, 3)) + '</td>'
-    + '<td>' + nf(h.price, 3) + '</td>'
-    + '<td class="' + ccls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
-    + '<td>' + nf(h.market_value) + '</td>'
-    + '<td class="' + cls(h.day_pnl) + '">' + sgn(h.day_pnl) + '</td>'
-    + '<td class="' + cls(h.total_pnl) + '">' + (h.total_pnl === null ? '—' : sgn(h.total_pnl)) + '</td>'
-    + '<td class="' + cls(h.pnl_pct) + '">' + (h.pnl_pct === null ? '—' : sgnPct(h.pnl_pct)) + '</td>'
-    + '</tr>';
-});
-allHtml += '</tbody></table></div></div>';
-
-/* ---------- 集中度 ---------- */
-let concHtml = '<div class="card"><h2>持仓集中度（三账户合并）</h2>';
-DATA.concentration.forEach(c => {
-  const isCash = c.code === 'CASH';
-  concHtml += '<div class="conc"><div class="conc-top">'
-    + '<span>' + esc(c.name) + (isCash ? '' : ' <span class="tag">' + c.code + '</span>') + '</span>'
-    + '<span>' + nf(c.pct, 1) + '% · ' + wan(c.market_value) + '</span></div>'
-    + '<div class="conc-bar"><i style="width:' + Math.min(100, c.pct).toFixed(1) + '%;'
-    + 'background:' + (isCash ? '#4a5568' : (c.pct > 30 ? '#f4575f' : '#4a8cff')) + '"></i></div>'
-    + '</div>';
-});
-concHtml += '</div>';
-
-/* ---------- 每日明细 ---------- */
-let histHtml = '<div class="card"><h2>每日资产与盈亏明细（近 ' + DATA.history.length + ' 个交易日）</h2>'
-  + '<div class="scroll"><table><thead><tr><th>日期</th><th>净资产（元）</th><th>较前一日（元）</th>'
-  + '<th>当日收益率</th><th>目标完成度</th><th>距目标（元）</th></tr></thead><tbody>';
-DATA.history.slice().reverse().forEach(h => {
-  histHtml += '<tr><td>' + h.date + '</td><td>' + nf(h.net_asset) + '</td>'
-    + '<td class="' + cls(h.change) + '">' + sgn(h.change) + '</td>'
-    + '<td class="' + cls(h.change_pct) + '">' + sgnPct(h.change_pct) + '</td>'
-    + '<td>' + nf(h.progress, 2) + '%</td><td>' + nf(h.gap, 0) + '</td></tr>';
-});
-histHtml += '</tbody></table></div></div>';
-
-/* ---------- 风险提示 ---------- */
-const top = DATA.concentration.filter(c => c.code !== 'CASH')[0];
-let risks = [];
-if (top && top.pct > 20) {
-  risks.push(['danger', '集中度过高：<b>' + esc(top.name) + '</b> 占净资产 <b>' + nf(top.pct, 1)
-    + '%</b>（市值 ' + wan(top.market_value) + '）。单一标的波动将主导整个组合表现，'
-    + '对退休储备这类长期目标，建议单一股票敞口控制在净资产的 10% 以内。']);
-}
-if (S.total_margin > 0) {
-  risks.push(['danger', '使用杠杆：融资余额 <b>' + wan(S.total_margin) + '</b>，占净资产 <b>'
-    + nf(S.margin_ratio, 1) + '%</b>。杠杆会放大下跌，且融资利息侵蚀长期复利，退休储备账户建议逐步降为 0。']);
-}
-if (S.float_pnl < 0) {
-  risks.push(['', '整体浮亏：持仓浮动亏损 <b>' + wan(Math.abs(S.float_pnl)) + '</b>（'
-    + sgnPct(S.float_pnl_pct) + '）。需区分「公司经营恶化」与「市场系统性回撤」，前者应止损，后者可持有。']);
-}
-risks.push(['info', '目标测算：按当前 <b>' + wan(S.net_asset) + '</b> 净资产，距 ' + S.retire_age
-  + ' 岁退休还有 <b>' + S.years + '</b> 年，达成 ' + wan(S.target) + ' 需年化 <b>' + nf(S.required_cagr, 2)
-  + '%</b>。但该组合历史波动显著（见上方曲线），实际路径会有大幅偏离，'
-  + '建议以「宽基指数 + 债券 + 少量卫星仓位」重构，把所需收益率交给时间而不是选股。']);
-risks.push(['info', '下一步：① 明确三个账户的统一目标权重；② 制定 <b>' + esc(top ? top.name : '重仓股')
-  + '</b> 的减持节奏（避免一次性冲击成本）；③ 建立每季度一次的再平衡纪律；'
-  + '④ 预留 6–12 个月生活费的现金垫，避免被动卖出。']);
-
-let riskHtml = '<div class="card"><h2>风险提示与建议</h2>';
-risks.forEach(r => {
-  riskHtml += '<div class="risk ' + (r[0] === 'danger' ? 'danger' : (r[0] === 'info' ? 'info' : '')) + '">' + r[1] + '</div>';
-});
-riskHtml += '</div>';
-
 document.getElementById('app').innerHTML =
-  targetCard + numCard + chartCard + accHtml + allHtml + concHtml + histHtml + riskHtml;
+  targetCard + numCard + chartCard + accHtml;
 
 /* ---------- 图表 ---------- */
 (function () {
