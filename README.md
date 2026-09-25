@@ -31,7 +31,8 @@ python update.py --unpack     # 把 holdings.json.enc 解回 holdings.json
 | `index.html` | 线上页面入口，由 Actions 从加密版复制而来 | 自动生成 | ✅ |
 | `update.bat` | 双击运行入口 | 不用改 | ✅ |
 | `secret.txt` | 本地保存的密码 | 首次 `--encrypt` 生成 | ❌ |
-| `.github/workflows/update.yml` | 每交易日 15:30 自动更新 | 不用改 | ✅ |
+| `trade_calendar.json` | A 股交易日历（2026 年 242 个交易日），节假日据此跳过更新 | **每年更新一次** | ✅ |
+| `.github/workflows/update.yml` | 每交易日 15:30 自动更新，休市跳过 | 不用改 | ✅ |
 
 ## 买卖之后怎么改
 
@@ -140,8 +141,33 @@ git status --short
    `Deploy from a branch`，分支 `main`、目录 `/ (root)`，保存。
 8. 拿到地址：`https://<你的用户名>.github.io/<仓库名>/`
 
-之后 **Actions 会在周一至周五 15:30（北京时间）自动跑**：解开加密持仓 → 抓行情 →
+之后 **Actions 会在每交易日 15:30（北京时间）自动跑**：解开加密持仓 → 抓行情 →
 生成加密页面 → 把更新后的持仓重新加密回仓。也可以在 Actions 页手动 `Run workflow`。
+
+### 休市不更新：法定节假日怎么处理的
+
+定时任务本身只排了周一至周五，法定节假日（春节、清明、五一、端午、中秋、国庆等）
+由 `trade_calendar.json` 拦掉——那个文件是 **2026 年 A 股全部 242 个交易日**的清单。
+
+流程是：先跑 `python update.py --check-trading-day`，不是交易日就把后面所有步骤标成
+`skipped`，**不解密持仓、不抓行情、不产生提交**，线上页面保持最近交易日的数据不变。
+
+```
+TODAY=2026-09-25
+TRADING_DAY=false
+PREV=2026-09-24
+NEXT=2026-09-28
+```
+
+页面顶部也不会误报「数据陈旧」：只要数据截止日已经是最近一个交易日，就正常显示
+「数据截止 XXXX-XX-XX（最近交易日），下一交易日 XXXX-XX-XX 收盘后自动更新」。
+
+**本地跑**想复现同样行为：`python update.py --skip-if-closed`。
+
+> ⚠️ **每年要更新一次日历**：`trade_calendar.json` 目前只覆盖 2026 年。
+> 到了 2027 年若没更新，脚本会退化为「周一至周五」判断——元旦这类工作日假仍会跑一次
+> （宁可多跑一次，也不能因为日历过期而永久停更），但春节/国庆长假会照常更新。
+> 续期方法：拿到新一年的 A 股交易日历后，替换 `trading_days` 数组即可，格式不变。
 
 ### 安全须知
 
